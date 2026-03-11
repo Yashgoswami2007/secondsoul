@@ -3,7 +3,7 @@ import { useInView } from "@/hooks/useInView";
 import sustainabilityBg from "@/assets/sustainability-bg.jpg";
 
 const stats = [
-  { icon: Droplets, value: "700", unit: "gallons", label: "of water saved per purchase" },
+  { icon: Droplets, value: "10", unit: "gallons", label: "of water saved per purchase" },
   { icon: Recycle, value: "12kg", unit: "", label: "of textile waste prevented" },
   { icon: Leaf, value: "60%", unit: "", label: "lower carbon footprint" },
 ];
