@@ -24,8 +24,11 @@ const SustainabilitySection = () => {
         <h2 className="font-heading text-3xl md:text-5xl font-bold text-foreground mb-4">
           Fashion With A Conscience
         </h2>
-        <p className="font-body text-base text-muted-foreground max-w-lg mx-auto mb-14">
+        <p className="font-body text-base text-muted-foreground max-w-2xl mx-auto mb-6">
           Every thrift purchase reduces textile waste and saves precious resources. Your style choices make a real impact.
+        </p>
+        <p className="font-body text-sm text-accent font-medium max-w-2xl mx-auto mb-14">
+          Together, our global thrifted community has saved over 32 million gallons of water and prevented 50,000 kg of textile waste.
         </p>
 
         <div className="grid md:grid-cols-3 gap-8 max-w-3xl mx-auto">
