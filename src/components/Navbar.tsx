@@ -6,11 +6,11 @@ import { Button } from "@/components/ui/button";
 const navLinks = [
   { label: "Home", href: "/" },
   { label: "Shop", href: "/shop" },
-  { label: "Vintage Collection", href: "/shop?category=vintage" },
+  { label: "Men", href: "/shop?category=men" },
+  { label: "Women", href: "/shop?category=women" },
+  { label: "Vintage", href: "/shop?category=vintage" },
   { label: "Streetwear", href: "/shop?category=streetwear" },
   { label: "Accessories", href: "/shop?category=accessories" },
-  { label: "About Us", href: "/about" },
-  { label: "Sustainability", href: "/sustainability" },
 ];
 
 const Navbar = () => {
