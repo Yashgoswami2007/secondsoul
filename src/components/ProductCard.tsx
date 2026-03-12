@@ -1,6 +1,7 @@
 import { Heart, ShoppingBag, Star } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useState } from "react";
+import { useCart } from "@/contexts/CartContext";
+import { useWishlist } from "@/contexts/WishlistContext";
 
 interface ProductCardProps {
   id: string;
@@ -13,8 +14,11 @@ interface ProductCardProps {
   isNew?: boolean;
 }
 
-const ProductCard = ({ name, image, size, condition, price, isNew }: ProductCardProps) => {
-  const [wishlisted, setWishlisted] = useState(false);
+const ProductCard = ({ id, name, image, size, condition, price, category, isNew }: ProductCardProps) => {
+  const { addToCart } = useCart();
+  const { toggleWishlist, isInWishlist } = useWishlist();
+  
+  const wishlisted = isInWishlist(id);
 
   return (
     <div className="group hover-lift">
@@ -46,7 +50,7 @@ const ProductCard = ({ name, image, size, condition, price, isNew }: ProductCard
 
         {/* Wishlist */}
         <button
-          onClick={() => setWishlisted(!wishlisted)}
+          onClick={() => toggleWishlist(id)}
           className="absolute top-3 right-3 w-8 h-8 rounded-full bg-background/80 backdrop-blur-sm flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300"
         >
           <Heart className={`h-4 w-4 ${wishlisted ? "fill-accent text-accent" : "text-foreground"}`} />
@@ -54,7 +58,12 @@ const ProductCard = ({ name, image, size, condition, price, isNew }: ProductCard
 
         {/* Quick Add */}
         <div className="absolute bottom-3 left-3 right-3 opacity-0 group-hover:opacity-100 transition-all duration-300 translate-y-2 group-hover:translate-y-0">
-          <Button variant="hero" size="sm" className="w-full gap-2 bg-primary/90 backdrop-blur-sm">
+          <Button 
+            variant="hero" 
+            size="sm" 
+            className="w-full gap-2 bg-primary/90 backdrop-blur-sm"
+            onClick={() => addToCart({ id, name, image, size, condition, price, category: category || "", isNew })}
+          >
             <ShoppingBag className="h-3.5 w-3.5" />
             Add to Cart
           </Button>

@@ -2,6 +2,10 @@ import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { Search, ShoppingBag, Heart, User, Menu, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useCart } from "@/contexts/CartContext";
+import { useWishlist } from "@/contexts/WishlistContext";
+import CartSheet from "@/components/CartSheet";
+import SearchDialog from "@/components/SearchDialog";
 
 const navLinks = [
   { label: "Home", href: "/" },
@@ -16,6 +20,11 @@ const navLinks = [
 const Navbar = () => {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
+  const [cartOpen, setCartOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+
+  const { cartCount } = useCart();
+  const { wishlistIds } = useWishlist();
 
   useEffect(() => {
     const handleScroll = () => {
@@ -49,21 +58,37 @@ const Navbar = () => {
 
         {/* Icons */}
         <div className="flex items-center gap-3">
-          <Button variant="ghost" size="icon" className="text-foreground">
+          <Button variant="ghost" size="icon" className="text-foreground" onClick={() => setSearchOpen(true)}>
             <Search className="h-5 w-5" />
           </Button>
-          <Button variant="ghost" size="icon" className="hidden sm:flex text-foreground">
-            <Heart className="h-5 w-5" />
-          </Button>
-          <Button variant="ghost" size="icon" className="relative text-foreground">
+          <Link to="/wishlist">
+            <Button variant="ghost" size="icon" className="hidden sm:flex text-foreground relative">
+              <Heart className="h-5 w-5" />
+              {wishlistIds.length > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-accent text-accent-foreground text-[10px] font-bold flex items-center justify-center">
+                  {wishlistIds.length}
+                </span>
+              )}
+            </Button>
+          </Link>
+          <Button 
+            variant="ghost" 
+            size="icon" 
+            className="relative text-foreground"
+            onClick={() => setCartOpen(true)}
+          >
             <ShoppingBag className="h-5 w-5" />
-            <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-accent text-accent-foreground text-[10px] font-bold flex items-center justify-center">
-              0
-            </span>
+            {cartCount > 0 && (
+              <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-accent text-accent-foreground text-[10px] font-bold flex items-center justify-center">
+                {cartCount}
+              </span>
+            )}
           </Button>
-          <Button variant="ghost" size="icon" className="hidden sm:flex text-foreground">
-            <User className="h-5 w-5" />
-          </Button>
+          <Link to="/account">
+            <Button variant="ghost" size="icon" className="hidden sm:flex text-foreground">
+              <User className="h-5 w-5" />
+            </Button>
+          </Link>
           <Button
             variant="ghost"
             size="icon"
@@ -93,6 +118,10 @@ const Navbar = () => {
           </ul>
         </div>
       )}
+      {/* Cart Sheet */}
+      <CartSheet open={cartOpen} onOpenChange={setCartOpen} />
+      {/* Search Dialog */}
+      <SearchDialog open={searchOpen} onOpenChange={setSearchOpen} />
     </header>
   );
 };
