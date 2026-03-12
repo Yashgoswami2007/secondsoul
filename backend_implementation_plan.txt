@@ -1,0 +1,505 @@
+╔══════════════════════════════════════════════════════════════════════════════╗
+║           SECOND SOUL — BACKEND IMPLEMENTATION PLAN                        ║
+║           Prepared: March 2026                                               ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+OVERVIEW
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+This document outlines the complete plan to upgrade Second Soul from a
+frontend-only web app to a full-stack application with:
+
+  • Firebase/Supabase backend (database + serverless functions)
+  • User authentication (Mobile OTP + Google OAuth)
+  • Persistent user data (cart, wishlist, orders, address book)
+  • Real-time Admin Panel synced to the live database
+  • Login / Sign-Up UI that matches the existing brand design
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+RECOMMENDED TECH STACK
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Layer               Tool                  Reason
+  ──────────────────  ────────────────────  ───────────────────────────────────
+  Authentication      Firebase Auth          Built-in OTP + Google OAuth, free
+  Database            Firestore (NoSQL)      Real-time sync, scales easily
+  Storage             Firebase Storage       Product images
+  Backend Functions   Firebase Cloud Funcs  Server-side logic (order confirm)
+  Hosting             Firebase Hosting /    Easy CI/CD with GitHub
+                      Cloudflare Pages
+  State (frontend)    React Context + SDK   Replace localStorage with Firestore
+
+  Alternative: Supabase (PostgreSQL) + Supabase Auth if SQL is preferred.
+  The steps below assume Firebase, but Supabase can be swapped 1:1.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PHASE 1 — PROJECT SETUP & FIREBASE INIT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Step 1.1 — Create Firebase Project
+  • Go to https://console.firebase.google.com
+  • Create project: "second-soul"
+  • Enable: Authentication, Firestore, Storage, Functions
+
+Step 1.2 — Install Firebase SDK
+  npm install firebase
+
+Step 1.3 — Create Firebase Config File
+  File: src/lib/firebase.ts
+  ┌──────────────────────────────────────────────────────────────────────┐
+  │  import { initializeApp } from "firebase/app";                       │
+  │  import { getAuth } from "firebase/auth";                            │
+  │  import { getFirestore } from "firebase/firestore";                  │
+  │  import { getStorage } from "firebase/storage";                      │
+  │                                                                      │
+  │  const firebaseConfig = {                                            │
+  │    apiKey: import.meta.env.VITE_FIREBASE_API_KEY,                    │
+  │    authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,            │
+  │    projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,              │
+  │    storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,      │
+  │    messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_ID,    │
+  │    appId: import.meta.env.VITE_FIREBASE_APP_ID,                      │
+  │  };                                                                  │
+  │                                                                      │
+  │  export const app = initializeApp(firebaseConfig);                   │
+  │  export const auth = getAuth(app);                                   │
+  │  export const db = getFirestore(app);                                │
+  │  export const storage = getStorage(app);                             │
+  └──────────────────────────────────────────────────────────────────────┘
+
+  Store secrets in .env.local (never commit to Git):
+    VITE_FIREBASE_API_KEY=...
+    VITE_FIREBASE_AUTH_DOMAIN=...
+    VITE_FIREBASE_PROJECT_ID=...
+    (etc.)
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PHASE 2 — DATABASE SCHEMA (FIRESTORE COLLECTIONS)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Collection: users/{uid}
+────────────────────────────────────────────────────────────────────────────
+  {
+    uid:            string,           // Firebase UID
+    displayName:    string,
+    email:          string | null,
+    phone:          string | null,    // +91XXXXXXXXXX
+    photoURL:       string | null,
+    createdAt:      Timestamp,
+    updatedAt:      Timestamp,
+
+    // Address Book (array of objects)
+    addresses: [
+      {
+        id:         string,
+        label:      string,           // "Home", "Work", etc.
+        line1:      string,
+        line2:      string,
+        city:       string,
+        state:      string,
+        pincode:    string,
+        isDefault:  boolean,
+      }
+    ],
+
+    // Preferences
+    emailNotifications:  boolean,
+    smsAlerts:           boolean,
+    newsletter:          boolean,
+  }
+
+Collection: users/{uid}/cart/{productId}
+────────────────────────────────────────────────────────────────────────────
+  {
+    productId:    string,
+    name:         string,
+    image:        string,
+    price:        number,
+    size:         string,
+    condition:    number,
+    category:     string,
+    quantity:     number,
+    addedAt:      Timestamp,
+  }
+
+Collection: users/{uid}/wishlist/{productId}
+────────────────────────────────────────────────────────────────────────────
+  {
+    productId:    string,
+    addedAt:      Timestamp,
+  }
+
+Collection: orders/{orderId}
+────────────────────────────────────────────────────────────────────────────
+  {
+    orderId:       string,            // auto-generated
+    userId:        string,            // Firebase UID
+    customerName:  string,
+    phone:         string,
+    email:         string,
+    items: [
+      { productId, name, price, quantity, size, condition }
+    ],
+    shippingAddress: { ... },
+    subtotal:      number,
+    shipping:      number,
+    total:         number,
+    status:        "Pending" | "Processing" | "Shipped" | "Delivered",
+    createdAt:     Timestamp,
+    updatedAt:     Timestamp,
+    paymentStatus: "Paid" | "Pending" | "Failed",
+    paymentMethod: string,
+  }
+
+Collection: products/{productId}
+────────────────────────────────────────────────────────────────────────────
+  {
+    id:            string,
+    name:          string,
+    description:   string,
+    price:         number,
+    size:          string,
+    condition:     number,
+    category:      string,
+    fabric:        string,
+    imageURL:      string,            // Firebase Storage URL
+    isNew:         boolean,
+    available:     boolean,
+    createdAt:     Timestamp,
+    updatedAt:     Timestamp,
+  }
+
+Collection: analytics/summary  (single document, updated by Cloud Functions)
+────────────────────────────────────────────────────────────────────────────
+  {
+    totalRevenue:     number,
+    totalOrders:      number,
+    totalProducts:    number,
+    pendingOrders:    number,
+    deliveredOrders:  number,
+    lastUpdated:      Timestamp,
+  }
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PHASE 3 — AUTHENTICATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Method A: Mobile Number OTP
+────────────────────────────────────────────────────────────────────────────
+  Firebase Provider:  PhoneAuthProvider
+  Flow:
+    1. User enters +91 XXXXXXXXXX
+    2. Firebase sends OTP via SMS (free 10 OTPs/day, then Twilio pricing)
+    3. User enters 6-digit OTP → Firebase validates → UID issued
+    4. If first login, create users/{uid} document in Firestore
+    5. Redirect to previous page or Account page
+
+  Required Setup:
+    • Enable "Phone" in Firebase Console > Authentication > Sign-in methods
+    • Add SHA-1 fingerprint if building Android version
+    • Set up reCAPTCHA verifier (invisible) to prevent abuse
+
+Method B: Continue with Google
+────────────────────────────────────────────────────────────────────────────
+  Firebase Provider:  GoogleAuthProvider
+  Flow:
+    1. User clicks "Continue with Google"
+    2. Google OAuth popup → user selects account
+    3. Firebase validates → UID issued
+    4. Check if users/{uid} exists → create if first login
+    5. Merge any guest cart/wishlist from localStorage into Firestore
+
+  Required Setup:
+    • Enable "Google" in Firebase Console > Authentication > Sign-in methods
+    • Add your domain to Authorized Domains
+
+New File: src/contexts/AuthContext.tsx
+────────────────────────────────────────────────────────────────────────────
+  Exports:
+    • useAuth() hook → { user, loading, signInWithGoogle,
+                         sendOtp, verifyOtp, signOut }
+    • AuthProvider wrapping the app
+
+  Key logic:
+    • onAuthStateChanged listener to persist session
+    • On sign-in, create/merge user document in Firestore
+    • Migrate any localStorage cart/wishlist to Firestore on first sign-in
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PHASE 4 — LOGIN / SIGN-UP UI
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+New Page: src/pages/AuthPage.tsx  (route: /login)
+────────────────────────────────────────────────────────────────────────────
+  Layout:
+    Left side (desktop):  Full-height brand image / animated tagline
+    Right side:           Auth form card
+
+  Design language: Dark background (#0e0e0e), cream/gold accents (#FFE8B3,
+  #FFD166), matching the existing hero aesthetic.
+
+  Step 1 — Landing screen:
+    • "SECOND SOUL" heading
+    • Subtext: "Sign in or create your account"
+    • [Continue with Google] button  ← Google logo + brand styling
+    • — or —
+    • [Mobile number field] + [Send OTP] button
+
+  Step 2 (after "Send OTP") — OTP verification:
+    • 6-box OTP input (each digit separate, auto-focus next)
+    • Countdown timer (60 seconds) + "Resend OTP" option
+    • [Verify & Continue] button
+
+  Step 3 (first-time users only) — Profile completion:
+    • Display Name field
+    • Optional email field
+    • [Complete Setup] button → creates Firestore user document
+
+  Redirect: After login → return to page the user was on
+           (use React Router's location.state.from or localStorage flag)
+
+Protected Route Guard:
+────────────────────────────────────────────────────────────────────────────
+  New file: src/components/ProtectedRoute.tsx
+  • Wraps routes that require authentication (/account, /wishlist, checkout)
+  • If user not logged in → redirect to /login?redirect=/original-path
+  • Show a loading spinner while auth state is being resolved
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PHASE 5 — CONNECTING CART & WISHLIST TO FIRESTORE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Replace existing CartContext.tsx and WishlistContext.tsx:
+────────────────────────────────────────────────────────────────────────────
+
+  If user IS logged in:
+    • Read/write to Firestore collection users/{uid}/cart and /wishlist
+    • Use onSnapshot() for real-time sync (cross-device live updates)
+
+  If user is NOT logged in (guest):
+    • Continue using localStorage (current behaviour, unchanged)
+
+  On Login:
+    • Read guest localStorage cart/wishlist
+    • Merge into Firestore (don't overwrite existing Firestore items)
+    • Clear localStorage
+
+  CartContext new functions:
+    • addToCart(product)      → setDoc to Firestore
+    • removeFromCart(id)      → deleteDoc from Firestore
+    • updateQuantity(id, qty) → updateDoc in Firestore
+    • clearCart()             → batch delete all cart docs
+    • cartItems               → derived from Firestore onSnapshot
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PHASE 6 — USER ACCOUNT PAGE (BACKEND CONNECTED)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Update src/pages/AccountPage.tsx:
+────────────────────────────────────────────────────────────────────────────
+  Profile Tab:
+    • Load displayName, email, phone, photoURL from Firestore
+    • Edit form → updateDoc on save
+    • Profile photo upload → Firebase Storage → update photoURL in Firestore
+
+  Address Book Tab (new):
+    • CRUD for multiple saved addresses
+    • Mark one as default
+    • Used at checkout for pre-filling
+
+  Orders Tab:
+    • Query orders collection where userId == currentUser.uid
+    • Real-time listener using onSnapshot
+    • Show status, items, total, date
+
+  Settings Tab:
+    • Toggle email/SMS/newsletter preferences → updateDoc in Firestore
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PHASE 7 — ADMIN PANEL BACKEND SYNC
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Update src/pages/AdminPage.tsx:
+────────────────────────────────────────────────────────────────────────────
+
+  Products:
+    • Load from Firestore products collection (onSnapshot for live updates)
+    • "Add Product" → upload image to Firebase Storage → addDoc to products
+    • "Edit Product" → updateDoc
+    • "Delete Product" → deleteDoc + delete image from Storage
+
+  Orders Dashboard:
+    • Load all documents from orders collection (real-time)
+    • Filter by status, date range, search by customer name
+    • Update order status → updateDoc(orders/{id}, { status: "Shipped" })
+    • Admin can trigger status changes that the customer sees live
+
+  Analytics:
+    • Read from analytics/summary document (updated by Cloud Function)
+    • Query orders for revenue breakdowns
+    • Query products for inventory counts per category
+
+  Cloud Function — onOrderCreate (triggers on new order):
+    • Increments analytics/summary.totalOrders and .totalRevenue
+    • Sends confirmation email/SMS to customer (via Twilio/SendGrid)
+    • Marks product as unavailable if sold out
+
+  Admin Auth Guard:
+    • Firestore Security Rule: only allow admin reads/writes if
+      auth.token.admin == true (set via Firebase Custom Claims)
+    • On admin login: verify custom claim before rendering panel
+    • Custom claim set via Firebase Admin SDK (Node.js script / Cloud Function)
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PHASE 8 — FIRESTORE SECURITY RULES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  rules_version = '2';
+  service cloud.firestore {
+    match /databases/{database}/documents {
+
+      // Users can only read/write their own data
+      match /users/{userId} {
+        allow read, write: if request.auth.uid == userId;
+
+        match /cart/{item} {
+          allow read, write: if request.auth.uid == userId;
+        }
+        match /wishlist/{item} {
+          allow read, write: if request.auth.uid == userId;
+        }
+      }
+
+      // Orders: users can read their own; admins can read/write all
+      match /orders/{orderId} {
+        allow read: if request.auth.uid == resource.data.userId
+                      || request.auth.token.admin == true;
+        allow write: if request.auth.token.admin == true;
+        allow create: if request.auth.uid != null;
+      }
+
+      // Products: anyone can read; only admins can write
+      match /products/{productId} {
+        allow read: if true;
+        allow write: if request.auth.token.admin == true;
+      }
+
+      // Analytics: only admins
+      match /analytics/{doc} {
+        allow read, write: if request.auth.token.admin == true;
+      }
+    }
+  }
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PHASE 9 — NAVBAR UPDATES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Update Navbar.tsx:
+────────────────────────────────────────────────────────────────────────────
+  User icon (👤):
+    • If NOT logged in → clicking navigates to /login
+    • If logged in     → shows a dropdown with:
+        - Avatar / name from Firestore
+        - Link to /account
+        - "Sign Out" option
+
+  Wishlist badge (❤️):
+    • Count from Firestore wishlist collection if logged in
+    • Falls back to localStorage count if guest
+
+  Cart badge (🛍️):
+    • Count from Firestore cart collection if logged in
+    • Falls back to localStorage if guest
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PHASE 10 — FILE CHANGE SUMMARY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Status   File                                    Change
+  ───────  ──────────────────────────────────────  ──────────────────────────
+  [NEW]    src/lib/firebase.ts                     Firebase config/exports
+  [NEW]    src/contexts/AuthContext.tsx            Auth state + hooks
+  [NEW]    src/components/ProtectedRoute.tsx       Route guard component
+  [NEW]    src/pages/AuthPage.tsx                  Login/OTP/Google UI
+  [MOD]    src/contexts/CartContext.tsx            Firestore integration
+  [MOD]    src/contexts/WishlistContext.tsx        Firestore integration
+  [MOD]    src/pages/AccountPage.tsx              Live Firestore data
+  [MOD]    src/pages/AdminPage.tsx                Live Firestore CRUD
+  [MOD]    src/components/Navbar.tsx              Auth-aware user icon
+  [MOD]    src/App.tsx                            AuthProvider + routes
+  [NEW]    .env.local                             Env vars (not committed)
+  [NEW]    firestore.rules                        Security rules
+  [NEW]    functions/index.ts                     Cloud Functions
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PHASE 11 — IMPLEMENTATION ORDER (RECOMMENDED)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  1. Set up Firebase project → install SDK → firebase.ts
+  2. Build AuthContext.tsx with Google + Phone OTP logic
+  3. Build AuthPage.tsx (Login UI)
+  4. Add AuthProvider + /login route to App.tsx
+  5. Add ProtectedRoute guard
+  6. Migrate CartContext to Firestore (with guest fallback)
+  7. Migrate WishlistContext to Firestore (with guest fallback)
+  8. Update AccountPage to read/write live user data
+  9. Update AdminPage to read/write products + orders from Firestore
+  10. Deploy Firestore Security Rules
+  11. Set up Cloud Function for order confirmation + analytics
+  12. Update Navbar to be auth-aware
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ESTIMATED EFFORT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Phase 1-2 (Setup + Schema)         1 session  (~1 hr)
+  Phase 3-4 (Auth + Login UI)        2 sessions (~2-3 hrs)
+  Phase 5   (Cart + Wishlist)        1 session  (~1 hr)
+  Phase 6   (Account Page)           1 session  (~1 hr)
+  Phase 7   (Admin Sync)             1 session  (~1 hr)
+  Phase 8-9 (Security + Navbar)      1 session  (~1 hr)
+  Phase 11  (Cloud Functions)        1 session  (~1-2 hrs)
+
+  Total estimated: ~8-10 hr to implement all phases end-to-end.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+NOTES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  • NEVER commit .env.local or firebase service account JSON files to Git.
+    Add them to .gitignore immediately.
+
+  • Firebase Free Tier (Spark Plan) includes:
+    - 50,000 auth operations/month
+    - 1 GiB Firestore storage
+    - 10 GiB bandwidth
+    This is sufficient for development and early traffic.
+
+  • Phone OTP is free for verification but Firebase uses reCAPTCHA to prevent
+    abuse on web. Invisible reCAPTCHA is recommended (no user friction).
+
+  • For production, upgrade to Blaze Plan (pay-as-you-go) to unlock
+    Cloud Functions and higher limits.
+
+  • The existing frontend-only features (carousel, shop, admin UI) remain
+    100% intact during backend integration — we only replace the data layer.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+END OF PLAN
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

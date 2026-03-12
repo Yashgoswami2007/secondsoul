@@ -1,9 +1,10 @@
-import { useState, useEffect } from "react";
-import { Link } from "react-router-dom";
-import { Search, ShoppingBag, Heart, User, Menu, X } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { Search, ShoppingBag, Heart, User, Menu, X, LogOut, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useCart } from "@/contexts/CartContext";
 import { useWishlist } from "@/contexts/WishlistContext";
+import { useAuth } from "@/contexts/AuthContext";
 import CartSheet from "@/components/CartSheet";
 import SearchDialog from "@/components/SearchDialog";
 
@@ -22,9 +23,29 @@ const Navbar = () => {
   const [scrolled, setScrolled] = useState(false);
   const [cartOpen, setCartOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const userMenuRef = useRef<HTMLDivElement>(null);
 
   const { cartCount } = useCart();
   const { wishlistIds } = useWishlist();
+  const { user, signOut } = useAuth();
+  const navigate = useNavigate();
+
+  const userInitial = user?.user_metadata?.full_name?.[0]
+    || user?.user_metadata?.name?.[0]
+    || user?.email?.[0]
+    || "U";
+
+  // Close user menu on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (userMenuRef.current && !userMenuRef.current.contains(e.target as Node)) {
+        setUserMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
 
   useEffect(() => {
     const handleScroll = () => {
@@ -84,11 +105,53 @@ const Navbar = () => {
               </span>
             )}
           </Button>
-          <Link to="/account">
-            <Button variant="ghost" size="icon" className="hidden sm:flex text-foreground">
-              <User className="h-5 w-5" />
-            </Button>
-          </Link>
+          {/* User icon — auth-aware */}
+          <div className="relative hidden sm:block" ref={userMenuRef}>
+            {user ? (
+              <>
+                <button
+                  onClick={() => setUserMenuOpen(!userMenuOpen)}
+                  className="w-8 h-8 rounded-full bg-[#FFD166] text-black font-heading font-bold text-sm flex items-center justify-center uppercase hover:opacity-90 transition-opacity"
+                  title={user.user_metadata?.full_name || user.email || "Account"}
+                >
+                  {userInitial}
+                </button>
+                {userMenuOpen && (
+                  <div className="absolute right-0 top-10 w-48 bg-card border border-border rounded-xl shadow-xl py-2 z-50 animate-fade-in">
+                    <p className="px-4 py-2 font-body text-xs text-muted-foreground truncate">
+                      {user.user_metadata?.full_name || user.email || "Guest"}
+                    </p>
+                    <div className="border-t border-border my-1" />
+                    <Link
+                      to="/account"
+                      onClick={() => setUserMenuOpen(false)}
+                      className="flex items-center gap-2 px-4 py-2 font-body text-sm text-foreground hover:bg-secondary/50 transition-colors"
+                    >
+                      <Settings className="w-3.5 h-3.5" />
+                      My Account
+                    </Link>
+                    <button
+                      onClick={() => { signOut(); setUserMenuOpen(false); }}
+                      className="w-full flex items-center gap-2 px-4 py-2 font-body text-sm text-red-500 hover:bg-red-50 transition-colors"
+                    >
+                      <LogOut className="w-3.5 h-3.5" />
+                      Sign Out
+                    </button>
+                  </div>
+                )}
+              </>
+            ) : (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="text-foreground"
+                onClick={() => navigate("/login")}
+                title="Sign In"
+              >
+                <User className="h-5 w-5" />
+              </Button>
+            )}
+          </div>
           <Button
             variant="ghost"
             size="icon"
