@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
@@ -7,7 +7,12 @@ import { products } from "@/data/products";
 import { Button } from "@/components/ui/button";
 import { SlidersHorizontal, X } from "lucide-react";
 
-const categories = ["all", "vintage", "streetwear", "accessories"];
+import maleHero from "@/assets/male.jpg";
+import femaleHero from "@/assets/female.jpg";
+import femaleA from "@/assets/femal-a.jpg";
+import maleA from "@/assets/men-a.jpg";
+
+const categories = ["all", "vintage", "streetwear", "accessories", "men", "women"];
 const sizes = ["S", "M", "L", "XL", "One Size", "42"];
 const conditions = [7, 8, 9, 10];
 
@@ -18,6 +23,15 @@ const ShopPage = () => {
   const [selectedSize, setSelectedSize] = useState<string | null>(null);
   const [minCondition, setMinCondition] = useState<number | null>(null);
   const [showFilters, setShowFilters] = useState(false);
+
+  useEffect(() => {
+    const categoryQuery = searchParams.get("category");
+    if (categoryQuery) {
+      setSelectedCategory(categoryQuery);
+    } else {
+      setSelectedCategory("all");
+    }
+  }, [searchParams]);
 
   const filtered = useMemo(() => {
     return products.filter((p) => {
@@ -40,8 +54,20 @@ const ShopPage = () => {
       <main className="pt-24 md:pt-28 pb-20">
         <div className="container">
           {/* Header */}
+          {(selectedCategory === "men" || selectedCategory === "women") && (
+            <div className="w-full h-48 md:h-64 mb-8 rounded-sm overflow-hidden relative animate-fade-in group">
+              <img
+                src={selectedCategory === "men" ? maleHero : femaleHero}
+                alt={`${selectedCategory} collection`}
+                className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
+              />
+              <div className="absolute inset-0 bg-black/20" />
+            </div>
+          )}
           <div className="mb-10">
-            <h1 className="font-heading text-4xl md:text-5xl font-bold text-foreground">Shop</h1>
+            <h1 className="font-heading text-4xl md:text-5xl font-bold text-foreground capitalize">
+              {selectedCategory === "all" ? "Shop All" : `${selectedCategory} Collection`}
+            </h1>
             <p className="font-body text-sm text-muted-foreground mt-2">
               {filtered.length} unique pieces available
             </p>
@@ -132,7 +158,31 @@ const ShopPage = () => {
           )}
 
           {/* Products Grid */}
-          {filtered.length > 0 ? (
+          {selectedCategory === "accessories" ? (
+            <div className="flex flex-col items-center justify-center py-16 animate-fade-in">
+              <h2 className="font-heading text-3xl md:text-5xl font-bold text-foreground mb-12 text-center">
+                Stay Tuned — Big Drop Ahead
+              </h2>
+              <div className="flex flex-col md:flex-row items-center justify-center gap-8 w-full max-w-4xl">
+                <div className="w-full md:w-1/2 aspect-[3/4] rounded-lg overflow-hidden relative shadow-lg group">
+                  <img
+                    src={femaleA}
+                    alt="Upcoming women's accessories preview"
+                    className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
+                  />
+                  <div className="absolute inset-0 bg-black/10 group-hover:bg-transparent transition-colors duration-500" />
+                </div>
+                <div className="w-full md:w-1/2 aspect-[3/4] rounded-lg overflow-hidden relative shadow-lg group">
+                  <img
+                    src={maleA}
+                    alt="Upcoming men's accessories preview"
+                    className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
+                  />
+                  <div className="absolute inset-0 bg-black/10 group-hover:bg-transparent transition-colors duration-500" />
+                </div>
+              </div>
+            </div>
+          ) : filtered.length > 0 ? (
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 md:gap-6">
               {filtered.map((product) => (
                 <ProductCard key={product.id} {...product} />

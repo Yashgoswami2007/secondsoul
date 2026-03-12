@@ -1,5 +1,6 @@
 import Navbar from "@/components/Navbar";
 import HeroSection from "@/components/HeroSection";
+import TrendingMarquee from "@/components/TrendingMarquee";
 import MarqueeBanner from "@/components/MarqueeBanner";
 import CategorySection from "@/components/CategorySection";
 import TrendingSection from "@/components/TrendingSection";
@@ -9,6 +10,7 @@ import CommunitySection from "@/components/CommunitySection";
 import TrustSection from "@/components/TrustSection";
 import NewsletterSection from "@/components/NewsletterSection";
 import Footer from "@/components/Footer";
+import ProductCarousel from "@/components/ProductCarousel";
 
 const Index = () => {
   return (
@@ -16,9 +18,11 @@ const Index = () => {
       <Navbar />
       <main>
         <HeroSection />
+        <TrendingMarquee />
         <MarqueeBanner />
         <CategorySection />
         <TrendingSection />
+        <ProductCarousel />
         <CollectionBanner />
         <SustainabilitySection />
         <CommunitySection />

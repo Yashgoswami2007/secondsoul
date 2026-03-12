@@ -1,4 +1,4 @@
-import { Heart, ShoppingBag } from "lucide-react";
+import { Heart, ShoppingBag, Star } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useState } from "react";
 
@@ -33,9 +33,15 @@ const ProductCard = ({ name, image, size, condition, price, isNew }: ProductCard
               New Drop
             </span>
           )}
-          <span className="condition-badge">
-            {condition}/10
-          </span>
+          <div className="relative group/condition">
+            <span className="condition-badge cursor-help">
+              {condition}/10
+            </span>
+            <div className="absolute left-full top-0 ml-2 w-48 p-2 bg-popover text-popover-foreground text-xs rounded shadow-lg opacity-0 invisible group-hover/condition:opacity-100 group-hover/condition:visible transition-all duration-200 z-10 pointer-events-none">
+              <p className="font-semibold mb-1">Condition Details</p>
+              <p>{condition >= 9 ? "Like new, minimal to zero flaws." : condition >= 7 ? "Gently used, minor fading or faint wear." : "Noticeable wear, possible small pinholes or marks."}</p>
+            </div>
+          </div>
         </div>
 
         {/* Wishlist */}
@@ -56,10 +62,18 @@ const ProductCard = ({ name, image, size, condition, price, isNew }: ProductCard
       </div>
 
       {/* Info */}
-      <div className="space-y-1">
-        <h3 className="font-body text-sm font-medium text-foreground leading-tight truncate">{name}</h3>
+      <div className="space-y-1.5 mt-3 px-1">
+        <h3 className="font-body text-sm font-medium text-foreground leading-tight truncate" title={name}>{name}</h3>
         <p className="font-body text-xs text-muted-foreground">Size: {size}</p>
-        <p className="font-heading text-base font-semibold text-foreground">₹{price}</p>
+        <div className="flex items-center justify-between">
+          <p className="font-heading text-base font-semibold text-foreground">₹{price}</p>
+          <div className="flex items-center text-gold">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <Star key={i} className={`w-3 h-3 ${i < 4 ? "fill-current" : "fill-current opacity-30"}`} />
+            ))}
+            <span className="text-[10px] text-muted-foreground ml-1">({(Math.random() * (4.9 - 4.0) + 4.0).toFixed(1)})</span>
+          </div>
+        </div>
       </div>
     </div>
   );

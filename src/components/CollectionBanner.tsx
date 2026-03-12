@@ -39,8 +39,8 @@ const CollectionBanner = () => {
                 className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
                 loading="lazy"
               />
-              <div className="absolute inset-0 bg-gradient-to-t from-foreground/70 via-foreground/20 to-transparent" />
-              <div className="absolute bottom-0 left-0 p-6 md:p-10">
+              <div className="absolute inset-0 bg-gradient-to-t from-foreground/80 via-foreground/30 to-transparent" />
+              <div className="absolute bottom-0 left-0 w-full p-6 md:p-10">
                 <h3 className="font-heading text-2xl md:text-4xl font-bold text-secondary whitespace-pre-line leading-tight mb-2">
                   {col.title}
                 </h3>
@@ -56,7 +56,7 @@ const CollectionBanner = () => {
         </div>
 
         {/* Under ₹999 Banner */}
-        <div className="mt-6 relative overflow-hidden rounded-sm bg-primary p-8 md:p-12 flex flex-col md:flex-row items-center justify-between gap-6">
+        <div className="mt-8 relative overflow-hidden rounded-sm bg-primary p-8 md:p-12 flex flex-col md:flex-row items-center justify-between gap-6 text-center md:text-left">
           <div>
             <p className="font-body text-xs tracking-[0.3em] uppercase text-gold mb-2">Budget Friendly</p>
             <h3 className="font-heading text-2xl md:text-3xl font-bold text-primary-foreground">
