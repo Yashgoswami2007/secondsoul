@@ -10,6 +10,7 @@ import { CartProvider } from "./contexts/CartContext.tsx";
 import { WishlistProvider } from "./contexts/WishlistContext.tsx";
 import WishlistPage from "./pages/WishlistPage.tsx";
 import AccountPage from "./pages/AccountPage.tsx";
+import AdminPage from "./pages/AdminPage.tsx";
 
 const queryClient = new QueryClient();
 
@@ -26,6 +27,7 @@ const App = () => (
               <Route path="/shop" element={<ShopPage />} />
               <Route path="/wishlist" element={<WishlistPage />} />
               <Route path="/account" element={<AccountPage />} />
+              <Route path="/admin" element={<AdminPage />} />
               {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
               <Route path="*" element={<NotFound />} />
             </Routes>

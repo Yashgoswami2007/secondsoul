@@ -62,7 +62,7 @@ const Footer = () => {
             ))}
             {/* Pinterest & TikTok as text since no lucide icons */}
             <a href="#" className="font-body text-xs text-secondary/40 hover:text-secondary transition-colors">Pinterest</a>
-            <a href="#" className="font-body text-xs text-secondary/40 hover:text-secondary transition-colors">TikTok</a>
+            <Link to="/admin" className="font-body text-xs text-secondary/40 hover:text-secondary transition-colors">Admin</Link>
           </div>
         </div>
       </div>
