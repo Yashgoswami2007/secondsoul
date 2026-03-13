@@ -1,30 +1,68 @@
-import { useState } from "react";
-import { Link } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard, Package, ShoppingBag, BarChart3,
   Plus, Pencil, Trash2, X, Check, Search,
   DollarSign, Clock, ChevronRight, ArrowUpRight, ArrowLeft,
-  Lock, Eye, EyeOff, ShieldCheck, LogOut,
+  LogOut, AlertCircle
 } from "lucide-react";
-import { products as initialProducts, Product } from "@/data/products";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { supabase } from "@/lib/supabase";
+import { useAuth } from "@/contexts/AuthContext";
+import { toast } from "sonner";
 
-// ───────────────────────────── Mock Data ──────────────────────────────────
-const mockOrders = [
-  { id: "#SS001", customer: "Aarav Shah", items: ["Vintage Nike Hoodie", "Graphic Camp Tee"], total: 1398, status: "Delivered", date: "Feb 26, 2026" },
-  { id: "#SS002", customer: "Priya Mehta", items: ["Leather Crossbody Bag"], total: 1499, status: "Shipped", date: "Mar 2, 2026" },
-  { id: "#SS003", customer: "Rohan Verma", items: ["Classic Bomber Jacket", "Tech Cargo Pants"], total: 3198, status: "Processing", date: "Mar 7, 2026" },
-  { id: "#SS004", customer: "Neha Joshi", items: ["Ribbed Midi Dress"], total: 1299, status: "Pending", date: "Mar 10, 2026" },
-  { id: "#SS005", customer: "Kiran Das", items: ["Wool Turtleneck Sweater", "Corduroy Wide Trousers"], total: 1798, status: "Delivered", date: "Mar 11, 2026" },
-  { id: "#SS006", customer: "Ananya Singh", items: ["Satin Slip Skirt", "Lace Trim Cami"], total: 1398, status: "Processing", date: "Mar 12, 2026" },
-];
+// ───────────────────────────── Types ──────────────────────────────────
+interface Product {
+  id: string;
+  name: string;
+  description: string | null;
+  price: number;
+  size: string | null;
+  condition: number | null;
+  category: string | null;
+  fabric: string | null;
+  image_url: string | null;
+  is_new: boolean;
+  available: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+interface Order {
+  id: string;
+  user_id: string;
+  customer_name: string | null;
+  phone: string | null;
+  email: string | null;
+  subtotal: number | null;
+  shipping_cost: number | null;
+  total: number | null;
+  status: string;
+  payment_status: string | null;
+  payment_method: string | null;
+  shipping_address: any | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface OrderItem {
+  id: string;
+  order_id: string;
+  product_id: string | null;
+  name: string | null;
+  price: number | null;
+  size: string | null;
+  condition: number | null;
+  quantity: number;
+}
 
 const statusColor: Record<string, string> = {
   Delivered: "bg-emerald-100 text-emerald-700",
   Shipped: "bg-blue-100 text-blue-700",
   Processing: "bg-amber-100 text-amber-700",
   Pending: "bg-gray-100 text-gray-500",
+  Cancelled: "bg-red-100 text-red-700",
 };
 
 const tabs = [
@@ -34,187 +72,306 @@ const tabs = [
   { id: "analytics", label: "Analytics", icon: BarChart3 },
 ];
 
-const emptyProduct: Omit<Product, "image"> & { image: string } = {
-  id: "",
+const emptyProduct: Omit<Product, "id" | "created_at" | "updated_at"> = {
   name: "",
-  image: "",
-  size: "M",
-  condition: 9,
-  price: 0,
-  category: "vintage",
   description: "",
+  price: 0,
+  size: "",
+  condition: 8,
+  category: "vintage",
   fabric: "",
+  image_url: "",
+  is_new: false,
+  available: true,
 };
-
-// ───────────────────────────── Auth constants ─────────────────────────────
-const ADMIN_USER = "admin@soulstore_1";
-const ADMIN_PASS = "3#$hksht&b";
-const SESSION_KEY = "ss_admin_auth";
 
 // ───────────────────────────── Component ──────────────────────────────────
 const AdminPage = () => {
-  // ── Auth state ─────────────────────────────
-  const [isAuthenticated, setIsAuthenticated] = useState(
-    () => sessionStorage.getItem(SESSION_KEY) === "true"
-  );
-  const [loginUsername, setLoginUsername] = useState("");
-  const [loginPassword, setLoginPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
-  const [loginError, setLoginError] = useState("");
-  const [shaking, setShaking] = useState(false);
+  const { user, signOut, isAdmin } = useAuth();
+  const navigate = useNavigate();
+  
+  // ── State ─────────────────────────────
+  const [loading, setLoading] = useState(true);
+  
+  // ── Data state ─────────────────────────────
+  const [products, setProducts] = useState<Product[]>([]);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [orderItems, setOrderItems] = useState<Record<string, OrderItem[]>>({});
+  
+  // ── UI state ─────────────────────────────
+  const [activeTab, setActiveTab] = useState("dashboard");
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [isAdding, setIsAdding] = useState(false);
+  const [newProduct, setNewProduct] = useState<Omit<Product, "id" | "created_at" | "updated_at">>({ ...emptyProduct });
+  const [searchQuery, setSearchQuery] = useState("");
+  const [orderSearch, setOrderSearch] = useState("");
 
-  const handleLogin = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (loginUsername === ADMIN_USER && loginPassword === ADMIN_PASS) {
-      sessionStorage.setItem(SESSION_KEY, "true");
-      setIsAuthenticated(true);
-      setLoginError("");
-    } else {
-      setLoginError("Invalid credentials. Please try again.");
-      setShaking(true);
-      setTimeout(() => setShaking(false), 600);
+  // ── Check admin access ─────────────────────────────
+  useEffect(() => {
+    const checkAdminAccess = async () => {
+      if (!user) {
+        navigate("/");
+        return;
+      }
+
+      // Admin access is handled by AuthContext
+      // Just set loading to false since isAdmin comes from context
+      setLoading(false);
+    };
+
+    checkAdminAccess();
+  }, [user, navigate]);
+
+  // ── Load data ─────────────────────────────
+  useEffect(() => {
+    if (isAdmin) {
+      loadData();
     }
+  }, [isAdmin]);
+
+  const loadData = async () => {
+    await Promise.all([
+      loadProducts(),
+      loadOrders()
+    ]);
   };
 
-  const handleLogout = () => {
-    sessionStorage.removeItem(SESSION_KEY);
-    setIsAuthenticated(false);
-    setLoginUsername("");
-    setLoginPassword("");
+  const loadProducts = async () => {
+    const { data, error } = await supabase
+      .from("products")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      console.error("Error loading products:", error);
+      toast.error("Failed to load products");
+      return;
+    }
+
+    setProducts(data || []);
   };
 
-  // ── Login gate ─────────────────────────────
-  if (!isAuthenticated) {
+  const loadOrders = async () => {
+    const { data: ordersData, error: ordersError } = await supabase
+      .from("orders")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (ordersError) {
+      console.error("Error loading orders:", ordersError);
+      toast.error("Failed to load orders");
+      return;
+    }
+
+    setOrders(ordersData || []);
+
+    // Load order items for each order
+    const itemsMap: Record<string, OrderItem[]> = {};
+    for (const order of ordersData || []) {
+      const { data: itemsData, error: itemsError } = await supabase
+        .from("order_items")
+        .select("*")
+        .eq("order_id", order.id);
+
+      if (!itemsError && itemsData) {
+        itemsMap[order.id] = itemsData;
+      }
+    }
+    setOrderItems(itemsMap);
+  };
+
+  // ── Product handlers ───────────────────
+  const saveEdit = async () => {
+    if (!editingProduct) return;
+
+    const { error } = await supabase
+      .from("products")
+      .update({
+        name: editingProduct.name,
+        description: editingProduct.description,
+        price: editingProduct.price,
+        size: editingProduct.size,
+        condition: editingProduct.condition,
+        category: editingProduct.category,
+        fabric: editingProduct.fabric,
+        image_url: editingProduct.image_url,
+        is_new: editingProduct.is_new,
+        available: editingProduct.available,
+        updated_at: new Date().toISOString()
+      })
+      .eq("id", editingProduct.id);
+
+    if (error) {
+      console.error("Error updating product:", error);
+      toast.error("Failed to update product");
+      return;
+    }
+
+    toast.success("Product updated successfully");
+    setEditingProduct(null);
+    loadProducts();
+  };
+
+  const deleteProduct = async (id: string) => {
+    const { error } = await supabase
+      .from("products")
+      .delete()
+      .eq("id", id);
+
+    if (error) {
+      console.error("Error deleting product:", error);
+      toast.error("Failed to delete product");
+      return;
+    }
+
+    toast.success("Product deleted successfully");
+    setProducts(prev => prev.filter(p => p.id !== id));
+  };
+
+  const addProduct = async () => {
+    if (!newProduct.name || !newProduct.price) {
+      toast.error("Please fill in required fields");
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from("products")
+      .insert([{
+        name: newProduct.name,
+        description: newProduct.description,
+        price: newProduct.price,
+        size: newProduct.size,
+        condition: newProduct.condition,
+        category: newProduct.category,
+        fabric: newProduct.fabric,
+        image_url: newProduct.image_url,
+        is_new: newProduct.is_new,
+        available: newProduct.available,
+      }])
+      .select();
+
+    if (error) {
+      console.error("Error adding product:", error);
+      toast.error("Failed to add product");
+      return;
+    }
+
+    toast.success("Product added successfully");
+    setProducts(prev => [data[0], ...prev]);
+    setNewProduct({ ...emptyProduct });
+    setIsAdding(false);
+  };
+
+  const updateOrderStatus = async (orderId: string, status: string) => {
+    const { error } = await supabase
+      .from("orders")
+      .update({ status, updated_at: new Date().toISOString() })
+      .eq("id", orderId);
+
+    if (error) {
+      console.error("Error updating order status:", error);
+      toast.error("Failed to update order status");
+      return;
+    }
+
+    toast.success("Order status updated");
+    setOrders(prev => 
+      prev.map(order => 
+        order.id === orderId ? { ...order, status, updated_at: new Date().toISOString() } : order
+      )
+    );
+  };
+
+  const filteredProducts = products.filter((p) =>
+    p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (p.category && p.category.toLowerCase().includes(searchQuery.toLowerCase()))
+  );
+
+  const filteredOrders = orders.filter(
+    (o) =>
+      (o.customer_name && o.customer_name.toLowerCase().includes(orderSearch.toLowerCase())) ||
+      o.id.toLowerCase().includes(orderSearch.toLowerCase()) ||
+      o.status.toLowerCase().includes(orderSearch.toLowerCase())
+  );
+
+  // ── Stats ──────────────────────────────
+  const totalRevenue = orders.reduce((sum, order) => sum + (order.total || 0), 0);
+  const delivered = orders.filter((o) => o.status === "Delivered").length;
+  const pending = orders.filter((o) => o.status === "Pending" || o.status === "Processing").length;
+
+  // ── Bar chart helper ───────────────────
+  const salesByCategory: Record<string, number> = {};
+  orders.forEach((order) => { 
+    salesByCategory["All"] = (salesByCategory["All"] || 0) + (order.total || 0); 
+  });
+  
+  const categories = [...new Set(products.map(p => p.category).filter(Boolean))] as string[];
+  categories.forEach((cat) => {
+    const catProducts = products.filter((p) => p.category === cat);
+    salesByCategory[cat] = catProducts.reduce((sum, p) => sum + p.price, 0);
+  });
+  
+  const maxSales = Math.max(...Object.values(salesByCategory));
+
+  // ── Loading state ─────────────────────────────
+  if (loading) {
     return (
-      <div className="min-h-screen bg-foreground flex items-center justify-center p-6">
-        <div className={`w-full max-w-sm transition-all duration-150 ${shaking ? "animate-[shake_0.4s_ease-in-out]" : ""}`}
-          style={shaking ? { animation: "shake 0.4s ease" } : {}}>
-          {/* Logo */}
-          <div className="text-center mb-8">
-            <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-[#FFD166]/10 border border-[#FFD166]/30 mb-4">
-              <Lock className="w-6 h-6 text-[#FFD166]" />
-            </div>
-            <h1 className="font-heading text-2xl font-bold text-secondary">Admin Access</h1>
-            <p className="font-body text-xs text-secondary/40 mt-1">Second Soul Control Panel</p>
-          </div>
-
-          {/* Form card */}
-          <form onSubmit={handleLogin} className="bg-secondary/5 border border-secondary/10 rounded-2xl p-8 space-y-5">
-            <div>
-              <label className="font-body text-xs text-secondary/50 uppercase tracking-wider block mb-2">Username</label>
-              <Input
-                type="text"
-                value={loginUsername}
-                onChange={(e) => { setLoginUsername(e.target.value); setLoginError(""); }}
-                placeholder="admin@soulstore_1"
-                autoFocus
-                autoComplete="username"
-                className="bg-secondary/5 border-secondary/20 text-secondary placeholder:text-secondary/20 focus-visible:ring-[#FFD166]/40 focus-visible:border-[#FFD166]/40"
-              />
-            </div>
-            <div>
-              <label className="font-body text-xs text-secondary/50 uppercase tracking-wider block mb-2">Password</label>
-              <div className="relative">
-                <Input
-                  type={showPassword ? "text" : "password"}
-                  value={loginPassword}
-                  onChange={(e) => { setLoginPassword(e.target.value); setLoginError(""); }}
-                  placeholder="••••••••••"
-                  autoComplete="current-password"
-                  className="bg-secondary/5 border-secondary/20 text-secondary placeholder:text-secondary/20 focus-visible:ring-[#FFD166]/40 focus-visible:border-[#FFD166]/40 pr-10"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-secondary/30 hover:text-secondary/60 transition-colors"
-                >
-                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
-              </div>
-            </div>
-
-            {loginError && (
-              <p className="font-body text-xs text-red-400 flex items-center gap-1.5">
-                <X className="w-3.5 h-3.5" />
-                {loginError}
-              </p>
-            )}
-
-            <Button
-              type="submit"
-              className="w-full bg-[#FFD166] text-black hover:bg-[#FFD166]/90 font-bold py-5 mt-2"
-            >
-              <ShieldCheck className="w-4 h-4 mr-2" />
-              Sign In to Admin
-            </Button>
-          </form>
-
-          <div className="text-center mt-6">
-            <Link to="/" className="font-body text-xs text-secondary/30 hover:text-secondary/60 transition-colors flex items-center justify-center gap-1.5">
-              <ArrowLeft className="w-3.5 h-3.5" />
-              Back to Store
-            </Link>
-          </div>
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-8 h-8 rounded-full border-2 border-[#FFD166] border-t-transparent animate-spin" />
+          <p className="font-body text-sm text-muted-foreground">Loading admin panel...</p>
         </div>
       </div>
     );
   }
 
-  // ── Admin state ────────────────────────────
-  const [activeTab, setActiveTab] = useState("dashboard");
-  const [productList, setProductList] = useState<Product[]>(initialProducts);
-  const [orderList] = useState(mockOrders);
-  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
-  const [isAdding, setIsAdding] = useState(false);
-  const [newProduct, setNewProduct] = useState<typeof emptyProduct>({ ...emptyProduct });
-  const [searchQuery, setSearchQuery] = useState("");
-  const [orderSearch, setOrderSearch] = useState("");
+  // ── Unauthorized access ─────────────────────────────
+  if (!isAdmin) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center p-6">
+        <div className="text-center max-w-md">
+          <div className="w-16 h-16 rounded-full bg-muted border-2 border-dashed mx-auto mb-6 flex items-center justify-center">
+            <AlertCircle className="w-8 h-8 text-muted-foreground" />
+          </div>
+          <h1 className="font-heading text-2xl font-bold text-foreground mb-2">Access Denied</h1>
+          <p className="font-body text-muted-foreground mb-6">
+            You don't have permission to access the admin panel. Only administrators can view this page.
+          </p>
+          <Button 
+            onClick={() => navigate("/")} 
+            className="bg-[#FFD166] text-black hover:bg-[#FFD166]/90 font-bold"
+          >
+            Back to Store
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
-  // ── Stats ──────────────────────────────
-  const totalRevenue = mockOrders.reduce((a, o) => a + o.total, 0);
-  const delivered = mockOrders.filter((o) => o.status === "Delivered").length;
-  const pending = mockOrders.filter((o) => o.status === "Pending" || o.status === "Processing").length;
+  // ── Unauthorized access ─────────────────────────────
+  if (!isAdmin) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center p-6">
+        <div className="text-center max-w-md">
+          <div className="w-16 h-16 rounded-full bg-muted border-2 border-dashed mx-auto mb-6 flex items-center justify-center">
+            <AlertCircle className="w-8 h-8 text-muted-foreground" />
+          </div>
+          <h1 className="font-heading text-2xl font-bold text-foreground mb-2">Access Denied</h1>
+          <p className="font-body text-muted-foreground mb-6">
+            You don't have permission to access the admin panel. Only administrators can view this page.
+          </p>
+          <Button 
+            onClick={() => navigate("/")} 
+            className="bg-[#FFD166] text-black hover:bg-[#FFD166]/90 font-bold"
+          >
+            Back to Store
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
-  // ── Product handlers ───────────────────
-  const saveEdit = () => {
-    if (!editingProduct) return;
-    setProductList((prev) => prev.map((p) => (p.id === editingProduct.id ? editingProduct : p)));
-    setEditingProduct(null);
-  };
-
-  const deleteProduct = (id: string) => {
-    setProductList((prev) => prev.filter((p) => p.id !== id));
-  };
-
-  const addProduct = () => {
-    if (!newProduct.name || !newProduct.price) return;
-    const product: Product = { ...newProduct, id: `custom-${Date.now()}`, image: newProduct.image || "" };
-    setProductList((prev) => [product, ...prev]);
-    setNewProduct({ ...emptyProduct });
-    setIsAdding(false);
-  };
-
-  const filteredProducts = productList.filter((p) =>
-    p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    p.category.toLowerCase().includes(searchQuery.toLowerCase())
-  );
-
-  const filteredOrders = orderList.filter(
-    (o) =>
-      o.customer.toLowerCase().includes(orderSearch.toLowerCase()) ||
-      o.id.toLowerCase().includes(orderSearch.toLowerCase()) ||
-      o.status.toLowerCase().includes(orderSearch.toLowerCase())
-  );
-
-  // ── Bar chart helper ───────────────────
-  const salesByCategory: Record<string, number> = {};
-  mockOrders.forEach((order) => { salesByCategory["All"] = (salesByCategory["All"] || 0) + order.total; });
-  ["vintage", "streetwear", "men", "women", "accessories"].forEach((cat) => {
-    const cat_products = productList.filter((p) => p.category === cat);
-    salesByCategory[cat] = cat_products.reduce((a, p) => a + p.price, 0);
-  });
-  const maxSales = Math.max(...Object.values(salesByCategory));
-
+  // ── Main admin panel ─────────────────────────────
   return (
     <div className="min-h-screen bg-[hsl(var(--background))] flex">
       {/* ───── Sidebar ───── */}
@@ -248,9 +405,11 @@ const AdminPage = () => {
         </nav>
         <div className="px-6 py-5 border-t border-secondary/10">
           <p className="font-body text-[10px] text-secondary/30 uppercase tracking-wider">Logged in as</p>
-          <p className="font-body text-xs text-secondary/60 mt-0.5 font-medium">{ADMIN_USER}</p>
+          <p className="font-body text-xs text-secondary/60 mt-0.5 font-medium truncate">
+            {user?.email || "Administrator"}
+          </p>
           <button
-            onClick={handleLogout}
+            onClick={signOut}
             className="mt-3 flex items-center gap-2 text-xs font-body text-secondary/40 hover:text-red-400 transition-colors"
           >
             <LogOut className="w-3.5 h-3.5" />
@@ -273,8 +432,8 @@ const AdminPage = () => {
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-5">
               {[
                 { label: "Total Revenue", value: `₹${totalRevenue.toLocaleString()}`, icon: DollarSign, trend: "+12%", color: "bg-emerald-50 text-emerald-600" },
-                { label: "Total Orders", value: mockOrders.length, icon: ShoppingBag, trend: "+5%", color: "bg-blue-50 text-blue-600" },
-                { label: "Total Products", value: productList.length, icon: Package, trend: "+3", color: "bg-violet-50 text-violet-600" },
+                { label: "Total Orders", value: orders.length, icon: ShoppingBag, trend: "+5%", color: "bg-blue-50 text-blue-600" },
+                { label: "Total Products", value: products.length, icon: Package, trend: "+3", color: "bg-violet-50 text-violet-600" },
                 { label: "Pending Orders", value: pending, icon: Clock, trend: "Active", color: "bg-amber-50 text-amber-600" },
               ].map((stat) => {
                 const Icon = stat.icon;
@@ -305,16 +464,18 @@ const AdminPage = () => {
                 </button>
               </div>
               <div className="divide-y divide-border">
-                {mockOrders.slice(0, 4).map((order) => (
+                {orders.slice(0, 4).map((order) => (
                   <div key={order.id} className="flex items-center justify-between px-5 py-4">
                     <div>
                       <div className="flex items-center gap-2">
-                        <span className="font-heading font-bold text-sm">{order.id}</span>
+                        <span className="font-heading font-bold text-sm">#{order.id.substring(0, 8)}</span>
                         <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${statusColor[order.status]}`}>{order.status}</span>
                       </div>
-                      <p className="font-body text-xs text-muted-foreground mt-0.5">{order.customer}</p>
+                      <p className="font-body text-xs text-muted-foreground mt-0.5">
+                        {order.customer_name || "Unknown Customer"} · {new Date(order.created_at).toLocaleDateString()}
+                      </p>
                     </div>
-                    <p className="font-heading font-bold text-sm">₹{order.total}</p>
+                    <p className="font-heading font-bold text-sm">₹{order.total?.toFixed(2) || "0.00"}</p>
                   </div>
                 ))}
               </div>
@@ -328,7 +489,7 @@ const AdminPage = () => {
             <div className="flex items-center justify-between">
               <div>
                 <h2 className="font-heading text-3xl font-bold text-foreground">Products</h2>
-                <p className="font-body text-sm text-muted-foreground mt-1">{productList.length} total products</p>
+                <p className="font-body text-sm text-muted-foreground mt-1">{products.length} total products</p>
               </div>
               <Button
                 onClick={() => setIsAdding(true)}
@@ -368,7 +529,7 @@ const AdminPage = () => {
                     <div key={field.key}>
                       <label className="font-body text-xs text-muted-foreground block mb-1.5">{field.label}</label>
                       <Input
-                        type={field.type}
+                        type={field.type as any}
                         value={(newProduct as any)[field.key]}
                         onChange={(e) => setNewProduct((prev) => ({ ...prev, [field.key]: field.type === "number" ? +e.target.value : e.target.value }))}
                       />
@@ -377,21 +538,50 @@ const AdminPage = () => {
                   <div>
                     <label className="font-body text-xs text-muted-foreground block mb-1.5">Category</label>
                     <select
-                      value={newProduct.category}
-                      onChange={(e) => setNewProduct((prev) => ({ ...prev, category: e.target.value }))}
+                      value={newProduct.category || ""}
+                      onChange={(e) => setNewProduct((prev) => ({ ...prev, category: e.target.value || null }))}
                       className="w-full px-3 py-2 rounded-md border border-input bg-background font-body text-sm"
                     >
+                      <option value="">Select category</option>
                       {["vintage", "streetwear", "accessories", "men", "women"].map((c) => (
                         <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>
                       ))}
                     </select>
                   </div>
+                  <div>
+                    <label className="font-body text-xs text-muted-foreground block mb-1.5">Image URL</label>
+                    <Input
+                      type="text"
+                      value={newProduct.image_url || ""}
+                      onChange={(e) => setNewProduct((prev) => ({ ...prev, image_url: e.target.value || null }))}
+                    />
+                  </div>
+                  <div className="flex items-center gap-2 pt-6">
+                    <input
+                      type="checkbox"
+                      id="is_new"
+                      checked={newProduct.is_new}
+                      onChange={(e) => setNewProduct((prev) => ({ ...prev, is_new: e.target.checked }))}
+                      className="w-4 h-4"
+                    />
+                    <label htmlFor="is_new" className="font-body text-sm">New Arrival</label>
+                  </div>
+                  <div className="flex items-center gap-2 pt-6">
+                    <input
+                      type="checkbox"
+                      id="available"
+                      checked={newProduct.available}
+                      onChange={(e) => setNewProduct((prev) => ({ ...prev, available: e.target.checked }))}
+                      className="w-4 h-4"
+                    />
+                    <label htmlFor="available" className="font-body text-sm">Available</label>
+                  </div>
                 </div>
                 <div className="mt-4">
                   <label className="font-body text-xs text-muted-foreground block mb-1.5">Description</label>
                   <textarea
-                    value={newProduct.description}
-                    onChange={(e) => setNewProduct((prev) => ({ ...prev, description: e.target.value }))}
+                    value={newProduct.description || ""}
+                    onChange={(e) => setNewProduct((prev) => ({ ...prev, description: e.target.value || null }))}
                     rows={2}
                     className="w-full px-3 py-2 rounded-md border border-input bg-background font-body text-sm resize-none"
                   />
@@ -426,28 +616,47 @@ const AdminPage = () => {
                         </td>
                         <td className="px-5 py-3">
                           <select
-                            value={editingProduct.category}
-                            onChange={(e) => setEditingProduct({ ...editingProduct, category: e.target.value })}
+                            value={editingProduct.category || ""}
+                            onChange={(e) => setEditingProduct({ ...editingProduct, category: e.target.value || null })}
                             className="px-2 py-1 rounded border border-input bg-background text-xs font-body"
                           >
+                            <option value="">Select category</option>
                             {["vintage", "streetwear", "accessories", "men", "women"].map((c) => (
                               <option key={c} value={c}>{c}</option>
                             ))}
                           </select>
                         </td>
                         <td className="px-5 py-3">
-                          <Input value={editingProduct.size} onChange={(e) => setEditingProduct({ ...editingProduct, size: e.target.value })} className="h-8 text-xs w-16" />
+                          <Input 
+                            value={editingProduct.size || ""} 
+                            onChange={(e) => setEditingProduct({ ...editingProduct, size: e.target.value || null })} 
+                            className="h-8 text-xs w-16" 
+                          />
                         </td>
                         <td className="px-5 py-3">
-                          <Input type="number" value={editingProduct.condition} onChange={(e) => setEditingProduct({ ...editingProduct, condition: +e.target.value })} className="h-8 text-xs w-16" />
+                          <Input 
+                            type="number" 
+                            value={editingProduct.condition || ""} 
+                            onChange={(e) => setEditingProduct({ ...editingProduct, condition: e.target.value ? +e.target.value : null })} 
+                            className="h-8 text-xs w-16" 
+                          />
                         </td>
                         <td className="px-5 py-3">
-                          <Input type="number" value={editingProduct.price} onChange={(e) => setEditingProduct({ ...editingProduct, price: +e.target.value })} className="h-8 text-xs w-24" />
+                          <Input 
+                            type="number" 
+                            value={editingProduct.price} 
+                            onChange={(e) => setEditingProduct({ ...editingProduct, price: +e.target.value })} 
+                            className="h-8 text-xs w-24" 
+                          />
                         </td>
                         <td className="px-5 py-3">
                           <div className="flex gap-2">
-                            <button onClick={saveEdit} className="p-1.5 rounded-md bg-emerald-100 text-emerald-600 hover:bg-emerald-200"><Check className="w-3.5 h-3.5" /></button>
-                            <button onClick={() => setEditingProduct(null)} className="p-1.5 rounded-md bg-gray-100 text-gray-500 hover:bg-gray-200"><X className="w-3.5 h-3.5" /></button>
+                            <button onClick={saveEdit} className="p-1.5 rounded-md bg-emerald-100 text-emerald-600 hover:bg-emerald-200">
+                              <Check className="w-3.5 h-3.5" />
+                            </button>
+                            <button onClick={() => setEditingProduct(null)} className="p-1.5 rounded-md bg-gray-100 text-gray-500 hover:bg-gray-200">
+                              <X className="w-3.5 h-3.5" />
+                            </button>
                           </div>
                         </td>
                       </tr>
@@ -456,15 +665,27 @@ const AdminPage = () => {
                         <td className="px-5 py-3.5">
                           <div className="flex items-center gap-3">
                             <div className="w-9 h-10 rounded-md overflow-hidden bg-muted flex-shrink-0">
-                              <img src={prod.image} alt={prod.name} className="w-full h-full object-cover" />
+                              {prod.image_url ? (
+                                <img src={prod.image_url} alt={prod.name} className="w-full h-full object-cover" />
+                              ) : (
+                                <div className="w-full h-full flex items-center justify-center">
+                                  <Package className="w-4 h-4 text-muted-foreground" />
+                                </div>
+                              )}
                             </div>
                             <span className="font-body font-medium text-sm text-foreground">{prod.name}</span>
                           </div>
                         </td>
-                        <td className="px-5 py-3.5 font-body text-xs text-muted-foreground capitalize">{prod.category}</td>
-                        <td className="px-5 py-3.5 font-body text-xs text-muted-foreground">{prod.size}</td>
-                        <td className="px-5 py-3.5 font-body text-xs text-muted-foreground">{prod.condition}/10</td>
-                        <td className="px-5 py-3.5 font-heading font-bold text-sm">₹{prod.price}</td>
+                        <td className="px-5 py-3.5 font-body text-xs text-muted-foreground capitalize">
+                          {prod.category || "Uncategorized"}
+                        </td>
+                        <td className="px-5 py-3.5 font-body text-xs text-muted-foreground">
+                          {prod.size || "-"}
+                        </td>
+                        <td className="px-5 py-3.5 font-body text-xs text-muted-foreground">
+                          {prod.condition ? `${prod.condition}/10` : "-"}
+                        </td>
+                        <td className="px-5 py-3.5 font-heading font-bold text-sm">₹{prod.price.toFixed(2)}</td>
                         <td className="px-5 py-3.5">
                           <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                             <button
@@ -500,13 +721,24 @@ const AdminPage = () => {
           <div className="space-y-6">
             <div>
               <h2 className="font-heading text-3xl font-bold text-foreground">Orders</h2>
-              <p className="font-body text-sm text-muted-foreground mt-1">{orderList.length} total orders · {delivered} delivered · {pending} pending</p>
+              <p className="font-body text-sm text-muted-foreground mt-1">
+                {orders.length} total orders · {delivered} delivered · {pending} pending
+              </p>
             </div>
 
             {/* Order status summary pills */}
             <div className="flex flex-wrap gap-3">
-              {Object.entries({ All: orderList.length, Delivered: delivered, Shipped: orderList.filter((o) => o.status === "Shipped").length, Processing: orderList.filter((o) => o.status === "Processing").length, Pending: orderList.filter((o) => o.status === "Pending").length }).map(([label, count]) => (
-                <div key={label} className={`px-4 py-2 rounded-full text-xs font-medium border ${label === "All" ? "bg-foreground text-secondary border-foreground" : "bg-card border-border text-muted-foreground"}`}>
+              {Object.entries({ 
+                All: orders.length, 
+                Delivered: delivered, 
+                Shipped: orders.filter((o) => o.status === "Shipped").length, 
+                Processing: orders.filter((o) => o.status === "Processing").length, 
+                Pending: orders.filter((o) => o.status === "Pending").length,
+                Cancelled: orders.filter((o) => o.status === "Cancelled").length
+              }).map(([label, count]) => (
+                <div key={label} className={`px-4 py-2 rounded-full text-xs font-medium border ${
+                  label === "All" ? "bg-foreground text-secondary border-foreground" : "bg-card border-border text-muted-foreground"
+                }`}>
                   {label}: {count}
                 </div>
               ))}
@@ -514,33 +746,62 @@ const AdminPage = () => {
 
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input value={orderSearch} onChange={(e) => setOrderSearch(e.target.value)} placeholder="Search by customer, ID, or status…" className="pl-9" />
+              <Input 
+                value={orderSearch} 
+                onChange={(e) => setOrderSearch(e.target.value)} 
+                placeholder="Search by customer, ID, or status…" 
+                className="pl-9" 
+              />
             </div>
 
             <div className="bg-card border border-border rounded-xl overflow-hidden">
               <table className="w-full">
                 <thead className="border-b border-border bg-muted/30">
                   <tr>
-                    {["Order ID", "Customer", "Items", "Total", "Status", "Date"].map((h) => (
+                    {["Order ID", "Customer", "Items", "Total", "Status", "Date", "Actions"].map((h) => (
                       <th key={h} className="text-left px-5 py-3 font-body text-xs uppercase tracking-wider text-muted-foreground">{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
-                  {filteredOrders.map((order) => (
-                    <tr key={order.id} className="hover:bg-muted/20 transition-colors">
-                      <td className="px-5 py-4 font-heading font-bold text-sm">{order.id}</td>
-                      <td className="px-5 py-4 font-body text-sm text-foreground">{order.customer}</td>
-                      <td className="px-5 py-4 font-body text-xs text-muted-foreground max-w-[160px]">
-                        <p className="truncate">{order.items.join(", ")}</p>
-                      </td>
-                      <td className="px-5 py-4 font-heading font-bold text-sm">₹{order.total}</td>
-                      <td className="px-5 py-4">
-                        <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${statusColor[order.status]}`}>{order.status}</span>
-                      </td>
-                      <td className="px-5 py-4 font-body text-xs text-muted-foreground">{order.date}</td>
-                    </tr>
-                  ))}
+                  {filteredOrders.map((order) => {
+                    const items = orderItems[order.id] || [];
+                    return (
+                      <tr key={order.id} className="hover:bg-muted/20 transition-colors">
+                        <td className="px-5 py-4 font-heading font-bold text-sm">#{order.id.substring(0, 8)}</td>
+                        <td className="px-5 py-4 font-body text-sm text-foreground">
+                          {order.customer_name || "Unknown Customer"}
+                        </td>
+                        <td className="px-5 py-4 font-body text-xs text-muted-foreground max-w-[160px]">
+                          <p className="truncate">
+                            {items.length > 0 
+                              ? `${items[0].name}${items.length > 1 ? ` +${items.length - 1} more` : ""}` 
+                              : "No items"}
+                          </p>
+                        </td>
+                        <td className="px-5 py-4 font-heading font-bold text-sm">₹{order.total?.toFixed(2) || "0.00"}</td>
+                        <td className="px-5 py-4">
+                          <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${statusColor[order.status]}`}>
+                            {order.status}
+                          </span>
+                        </td>
+                        <td className="px-5 py-4 font-body text-xs text-muted-foreground">
+                          {new Date(order.created_at).toLocaleDateString()}
+                        </td>
+                        <td className="px-5 py-4">
+                          <select
+                            value={order.status}
+                            onChange={(e) => updateOrderStatus(order.id, e.target.value)}
+                            className="px-2 py-1 rounded border border-input bg-background text-xs font-body"
+                          >
+                            {["Pending", "Processing", "Shipped", "Delivered", "Cancelled"].map((status) => (
+                              <option key={status} value={status}>{status}</option>
+                            ))}
+                          </select>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
               {filteredOrders.length === 0 && (
@@ -564,11 +825,11 @@ const AdminPage = () => {
             <div className="grid grid-cols-2 md:grid-cols-3 gap-5">
               {[
                 { label: "Total Revenue", value: `₹${totalRevenue.toLocaleString()}`, sub: "All time" },
-                { label: "Avg Order Value", value: `₹${Math.round(totalRevenue / mockOrders.length)}`, sub: "Per order" },
+                { label: "Avg Order Value", value: orders.length > 0 ? `₹${Math.round(totalRevenue / orders.length)}` : "₹0", sub: "Per order" },
                 { label: "Conversion Rate", value: "3.4%", sub: "Visitors to buyers" },
                 { label: "Return Rate", value: "1.2%", sub: "Last 30 days" },
-                { label: "Active Products", value: productList.length, sub: "In catalogue" },
-                { label: "Customers", value: mockOrders.length, sub: "Unique buyers" },
+                { label: "Active Products", value: products.filter(p => p.available).length, sub: "In stock" },
+                { label: "Customers", value: new Set(orders.map(o => o.user_id)).size, sub: "Unique buyers" },
               ].map((kpi) => (
                 <div key={kpi.label} className="bg-card border border-border rounded-xl p-5">
                   <p className="font-heading text-2xl font-bold text-foreground">{kpi.value}</p>
@@ -582,13 +843,13 @@ const AdminPage = () => {
             <div className="bg-card border border-border rounded-xl p-6">
               <h3 className="font-heading text-lg font-bold mb-6">Inventory Value by Category</h3>
               <div className="space-y-4">
-                {Object.entries(salesByCategory).filter(([k]) => k !== "All").map(([cat, value]) => (
+                {Object.entries(salesByCategory).filter(([k]) => k !== "All" && k).map(([cat, value]) => (
                   <div key={cat} className="flex items-center gap-4">
                     <p className="font-body text-xs text-muted-foreground capitalize w-24 flex-shrink-0">{cat}</p>
                     <div className="flex-grow bg-muted rounded-full h-3 overflow-hidden">
                       <div
                         className="h-full bg-[#FFD166] rounded-full transition-all duration-700"
-                        style={{ width: `${(value / maxSales) * 100}%` }}
+                        style={{ width: `${maxSales > 0 ? (value / maxSales) * 100 : 0}%` }}
                       />
                     </div>
                     <p className="font-heading font-bold text-sm w-20 text-right">₹{value.toLocaleString()}</p>
@@ -600,15 +861,15 @@ const AdminPage = () => {
             {/* Order status breakdown */}
             <div className="bg-card border border-border rounded-xl p-6">
               <h3 className="font-heading text-lg font-bold mb-6">Order Status Breakdown</h3>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                {["Delivered", "Shipped", "Processing", "Pending"].map((status) => {
-                  const count = orderList.filter((o) => o.status === status).length;
-                  const pct = Math.round((count / orderList.length) * 100);
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                {["Delivered", "Shipped", "Processing", "Pending", "Cancelled"].map((status) => {
+                  const count = orders.filter((o) => o.status === status).length;
+                  const pct = orders.length > 0 ? Math.round((count / orders.length) * 100) : 0;
                   return (
-                    <div key={status} className={`rounded-xl p-4 ${statusColor[status]?.replace("text-", "bg-opacity-10 text-")}`}>
+                    <div key={status} className={`rounded-xl p-4 ${statusColor[status]?.replace("text-", "bg-opacity-10 text-") || "bg-gray-100 text-gray-700"}`}>
                       <p className="font-heading text-2xl font-bold">{count}</p>
                       <p className="font-body text-sm font-medium mt-1">{status}</p>
-                      <p className="font-body text-xs opacity-70 mt-0.5">{pct}% of all orders</p>
+                      <p className="font-body text-xs opacity-70 mt-0.5">{pct}% of orders</p>
                     </div>
                   );
                 })}

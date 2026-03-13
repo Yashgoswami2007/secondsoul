@@ -8,6 +8,7 @@ export default defineConfig(({ mode }) => ({
   server: {
     host: "::",
     port: 8080,
+    allowedHosts: ["windtight-pithecoid-nona.ngrok-free.dev"],
     hmr: {
       overlay: false,
     },
