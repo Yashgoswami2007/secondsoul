@@ -116,18 +116,27 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   // ── Google OAuth ────────────────────────────
-  const signInWithGoogle = async () => {
-    console.log('Initiating Google sign in...');
-    const redirectUrl = `${window.location.origin}/account`;
-    console.log('Redirect URL:', redirectUrl);
-    
-    // Make sure the redirect URL is properly encoded
-    const { data, error } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: {
-        redirectTo: redirectUrl,
-      },
-    });
+const signInWithGoogle = async () => {
+console.log('Initiating Google sign in...');
+const redirectUrl = `${window.location.origin}/auth/callback`;
+console.log('Redirect URL:', redirectUrl);
+console.log('Current URL:', window.location.href);
+
+// Make sure the redirect URL is properly encoded
+const { data, error } = await supabase.auth.signInWithOAuth({
+provider: "google",
+options: {
+redirectTo: redirectUrl,
+},
+});
+
+if (error) {
+console.error('Google sign-in error:', error);
+toast.error("Google sign-in failed. Please try again.");
+} else {
+console.log('Google sign-in initiated successfully, redirecting to:', data?.url);
+// The browser redirect is handled by Supabase automatically
+}
     
     if (error) {
       console.error('Google sign-in error:', error);
